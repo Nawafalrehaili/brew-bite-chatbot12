@@ -1,44 +1,52 @@
 import streamlit as st
+from transformers import T5Tokenizer, T5ForConditionalGeneration
 import pandas as pd
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import torch
 
 # Load model and tokenizer
 @st.cache_resource
 def load_model():
-    model_name = "google/flan-t5-base"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+    model = T5ForConditionalGeneration.from_pretrained("google/flan-t5-base")
+    tokenizer = T5Tokenizer.from_pretrained("google/flan-t5-base")
     return tokenizer, model
 
 tokenizer, model = load_model()
 
-# Load data from CSV
+# Load data (ensure the CSV is in the same directory or use an absolute path)
 @st.cache_data
-def load_context_from_csv():
+def load_data():
     df = pd.read_csv("data.csv")
-    paragraphs = []
-    for _, row in df.iterrows():
-        paragraph = f"فرع {row['اسم الفرع']} يقع في {row['المدينة']}. أوقات العمل: {row['أوقات الدوام']}. رضا العملاء: {row['رضا العملاء']}. رقم المدير: {row['رقم المدير']}."
-        paragraphs.append(paragraph)
-    return "\n".join(paragraphs)
+    return df
 
-context = load_context_from_csv()
+df = load_data()
 
-# Title
-st.title("🤖 شات بوت فروع Brew & Bite")
+# Create a mapping of city to paragraph
+def get_context(city):
+    row = df[df['city'].str.contains(city, case=False, na=False)]
+    if not row.empty:
+        return row.iloc[0]['context']
+    return ""
 
-# Input
-user_question = st.text_input("📝 اكتب سؤالك:")
-
-# Function to generate answer
+# Generate answer
 def generate_answer(question, context):
-    prompt = f"استخدم المعلومات التالية للإجابة: {context}\nالسؤال: {question}"
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True)
-    outputs = model.generate(**inputs, max_length=100)
+    input_text = f"question: {question} context: {context}"
+    input_ids = tokenizer(input_text, return_tensors="pt", truncation=True).input_ids
+    outputs = model.generate(input_ids, max_length=200)
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-# Output
+# Streamlit UI
+st.title("🤖 شات بوت فروع Brew & Bite")
+
+user_question = st.text_input("📝 اكتب سؤالك:")
 if user_question:
-    answer = generate_answer(user_question, context)
-    st.success("🤖 الرد: " + answer)
+    city_found = False
+    for city in df['city']:
+        if city in user_question:
+            context = get_context(city)
+            answer = generate_answer(user_question, context)
+            st.success(f"💬 الرد: {answer}")
+            city_found = True
+            break
+
+    if not city_found:
+        st.warning("⚠️ لم يتم العثور على مدينة في سؤالك. تأكد من ذكر اسم المدينة بشكل صحيح.")
